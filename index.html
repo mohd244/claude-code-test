@@ -131,14 +131,21 @@
         <label for="delayInput">Auto-launch countdown (seconds)</label>
         <input type="number" id="delayInput" min="0" max="60" step="1">
       </div>
+      <div class="row">
+        <input type="checkbox" id="appInput">
+        <label for="appInput">Open in the YouTube / YouTube Music app (Android)</label>
+      </div>
+      <p class="hint">Only works in Chrome or Samsung Internet — not inside an embedded app browser.</p>
       <div class="actions">
         <button id="saveBtn" class="primary" type="button">Save settings</button>
         <button id="resetBtn" type="button">Reset today’s play</button>
       </div>
       <p class="hint" id="lastPlayed"></p>
+      <p class="hint">Recent page loads: <span id="openLog"></span></p>
       <p class="hint">
         URL overrides for testing: <code>?force=1</code> (ignore the daily lock),
-        <code>?reset=1</code> (clear it), <code>?auto=1</code> / <code>?auto=0</code>.
+        <code>?reset=1</code> (clear it), <code>?auto=1</code> / <code>?auto=0</code>,
+        <code>?app=1</code> / <code>?app=0</code>.
       </p>
     </div>
   </details>

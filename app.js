@@ -18,17 +18,67 @@
     url: "https://music.youtube.com/watch?v=mavP2gTNrtg&si=pH8th9lFt2fgQuUl&t=0",
     dayStartHour: 4,   // 04:00 local time is the boundary between "days"
     autoLaunch: false, // true = redirect by itself, false = wait for one tap
-    countdown: 5       // seconds shown before an auto-launch fires
+    countdown: 5,      // seconds shown before an auto-launch fires
+    openInApp: true    // Android only: force the YouTube/YouTube Music app instead of the browser
   };
 
   var STORE_KEY = "morningDrive.v1";
+  var MAX_OPEN_LOG = 20;
+
+  /* ------------------------- Android app deep link ------------------------- *
+   * A plain https://music.youtube.com/... link opened by a non-interactive    *
+   * trigger (Samsung Routines, Tasker, etc.) usually lands in the browser     *
+   * instead of the app, because Android only hands a link to the matching    *
+   * app when it trusts the tap that opened it. An intent:// URL sidesteps    *
+   * that by naming the target app package directly, with the plain URL as a  *
+   * fallback if the app isn't installed. This only works in Chromium-based   *
+   * browsers (Chrome, Samsung Internet) — not in-app WebViews.               *
+   * -------------------------------------------------------------------------- */
+  var YOUTUBE_PACKAGES = {
+    "music.youtube.com": "com.google.android.apps.youtube.music",
+    "www.youtube.com": "com.google.android.youtube",
+    "youtube.com": "com.google.android.youtube",
+    "youtu.be": "com.google.android.youtube",
+    "m.youtube.com": "com.google.android.youtube"
+  };
+
+  function isAndroid() {
+    return /Android/i.test(navigator.userAgent || "");
+  }
+
+  // Returns an intent:// URL for a recognized YouTube host, or null if the
+  // link isn't one we know how to target (caller should use the plain URL).
+  function androidIntentUrl(rawUrl) {
+    var parsed;
+    try {
+      parsed = new URL(rawUrl);
+    } catch (e) {
+      return null;
+    }
+    var pkg = YOUTUBE_PACKAGES[parsed.hostname.toLowerCase()];
+    if (!pkg) return null;
+    var rest = parsed.href.slice(parsed.protocol.length + 2); // strip "https://"
+    return "intent://" + rest +
+      "#Intent;scheme=" + parsed.protocol.replace(":", "") +
+      ";package=" + pkg +
+      ";S.browser_fallback_url=" + encodeURIComponent(parsed.href) +
+      ";end";
+  }
+
+  function launchUrlFor(rawUrl, openInApp) {
+    if (openInApp && isAndroid()) {
+      var intentUrl = androidIntentUrl(rawUrl);
+      if (intentUrl) return intentUrl;
+    }
+    return rawUrl;
+  }
 
   /* --------------------------- storage --------------------------- */
 
   var storageOK = true;
 
   function readState() {
-    var empty = { settings: {}, lastDay: null, lastAt: null };
+    var empty = { settings: {}, lastDay: null, lastAt: null, opens: [] };
     try {
       var raw = window.localStorage.getItem(STORE_KEY);
       if (!raw) return empty;
@@ -36,7 +86,8 @@
       return {
         settings: parsed.settings || {},
         lastDay: parsed.lastDay || null,
-        lastAt: parsed.lastAt || null
+        lastAt: parsed.lastAt || null,
+        opens: Array.isArray(parsed.opens) ? parsed.opens : []
       };
     } catch (e) {
       storageOK = false;
@@ -53,6 +104,14 @@
   }
 
   var state = readState();
+
+  // Every page load gets a timestamp, independent of whether it led to a
+  // launch. This is the only way to tell "the phone never opened the browser"
+  // (nothing new appears here) apart from "it opened but didn't redirect"
+  // (an entry shows up, but lastAt / the music app didn't follow).
+  state.opens.push(new Date().toISOString());
+  if (state.opens.length > MAX_OPEN_LOG) state.opens = state.opens.slice(-MAX_OPEN_LOG);
+  writeState(state);
 
   /* ------------------------ config resolution ------------------------ */
 
@@ -80,12 +139,17 @@
       clampHour(state.settings.dayStartHour, DEFAULTS.dayStartHour)),
     autoLaunch: DEFAULTS.autoLaunch,
     countdown: clampCount(params.get("delay"),
-      clampCount(state.settings.countdown, DEFAULTS.countdown))
+      clampCount(state.settings.countdown, DEFAULTS.countdown)),
+    openInApp: DEFAULTS.openInApp
   };
 
   if (typeof state.settings.autoLaunch === "boolean") cfg.autoLaunch = state.settings.autoLaunch;
   var autoParam = boolParam("auto");
   if (autoParam !== null) cfg.autoLaunch = autoParam;
+
+  if (typeof state.settings.openInApp === "boolean") cfg.openInApp = state.settings.openInApp;
+  var appParam = boolParam("app");
+  if (appParam !== null) cfg.openInApp = appParam;
 
   var force = boolParam("force") === true;
 
@@ -145,9 +209,11 @@
     hourInput: document.getElementById("hourInput"),
     autoInput: document.getElementById("autoInput"),
     delayInput: document.getElementById("delayInput"),
+    appInput: document.getElementById("appInput"),
     saveBtn: document.getElementById("saveBtn"),
     resetBtn: document.getElementById("resetBtn"),
-    lastPlayed: document.getElementById("lastPlayed")
+    lastPlayed: document.getElementById("lastPlayed"),
+    openLog: document.getElementById("openLog")
   };
 
   var now = new Date();
@@ -167,15 +233,25 @@
     el.pillText.textContent = "Opening…";
     el.note.textContent = "If nothing happens, tap the link below.";
 
-    // replace() keeps this page out of the back stack, so backing out of the
-    // music app does not bounce straight into the launcher again.
-    try {
-      window.location.replace(cfg.url);
-    } catch (e) {
-      window.location.href = cfg.url;
+    var target = launchUrlFor(cfg.url, cfg.openInApp);
+    var isIntent = target.indexOf("intent://") === 0;
+
+    // intent:// isn't a real page navigation, so replace() can misbehave —
+    // assign it directly. For a plain https URL, replace() keeps this page
+    // out of the back stack, so backing out of the music app doesn't bounce
+    // straight into the launcher again.
+    if (isIntent) {
+      window.location.href = target;
+    } else {
+      try {
+        window.location.replace(target);
+      } catch (e) {
+        window.location.href = target;
+      }
     }
 
-    // Fallback for browsers that block the programmatic redirect.
+    // Fallback for browsers that block the programmatic redirect, or don't
+    // support intent:// (in which case this offers the plain URL instead).
     window.setTimeout(function () {
       el.note.innerHTML = '<a href="' + encodeURI(cfg.url) + '" style="color:inherit">Open the link manually</a>';
     }, 1200);
@@ -257,16 +333,27 @@
     el.hourInput.value = String(cfg.dayStartHour);
     el.autoInput.checked = cfg.autoLaunch;
     el.delayInput.value = String(cfg.countdown);
+    el.appInput.checked = cfg.openInApp;
     el.lastPlayed.textContent = state.lastAt
       ? "Last played: " + new Date(state.lastAt).toLocaleString()
       : "Last played: never";
+
+    // Recent page loads, newest first — the only client-side way to tell
+    // "the phone never opened the browser today" apart from "it opened but
+    // the redirect failed", since a load that never happens can't log itself.
+    el.openLog.textContent = state.opens.length
+      ? state.opens.slice().reverse().map(function (iso) {
+          return new Date(iso).toLocaleString();
+        }).join(" · ")
+      : "none yet";
 
     el.saveBtn.onclick = function () {
       state.settings = {
         url: el.urlInput.value.trim() || DEFAULTS.url,
         dayStartHour: clampHour(el.hourInput.value, DEFAULTS.dayStartHour),
         autoLaunch: el.autoInput.checked,
-        countdown: clampCount(el.delayInput.value, DEFAULTS.countdown)
+        countdown: clampCount(el.delayInput.value, DEFAULTS.countdown),
+        openInApp: el.appInput.checked
       };
       writeState(state);
       el.saveBtn.textContent = storageOK ? "Saved ✓" : "Could not save";
