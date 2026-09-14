@@ -56,10 +56,17 @@ A plain `https://music.youtube.com/...` link, opened by something other than a r
 hands the link to the app when it trusts the gesture that opened it, and an automation-triggered
 page load doesn't count.
 
-To force it, the page rewrites recognized YouTube links (`music.youtube.com`, `youtube.com`,
-`youtu.be`) into an `intent://` URL that names the YouTube/YouTube Music package directly, with
-the plain link as a fallback if the app isn't installed. This is on by default and only applies
-on Android; toggle it off in Settings (or `?app=0`) if you ever want the browser instead.
+To force it, the page rewrites recognized YouTube links into an `intent://` URL that names a
+package directly. For a `music.youtube.com` link specifically, it's a **chain**: try the YouTube
+Music app first; if that's not installed, try the regular YouTube app next (same video, just
+without the Music UI); only if neither is installed does it fall back to the plain link in the
+browser. Plain `youtube.com`/`youtu.be` links just target the regular YouTube app. This is on by
+default and only applies on Android; toggle it off in Settings (or `?app=0`) if you ever want the
+browser instead.
+
+**If you're still landing on the website after this fix**, the near-certain cause is that neither
+app is installed (or signed in) on that phone — check the YouTube Music app icon is actually
+there, not just YouTube. That's not a bug in the page; there's no app left to hand the link to.
 
 **Limits:** this only works in Chromium-based browsers — Chrome or Samsung Internet. If the
 Bluetooth trigger opens the page inside some other in-app WebView, `intent://` won't resolve and
@@ -74,28 +81,42 @@ screen is off or the phone is locked, unless the triggering app has a specific e
 Routines is a known offender here: the "Open link" / "Open app" action can silently no-op with the
 screen off, even though the routine itself ran.
 
+**Confirming test:** unlocking the phone *after* the fact doesn't retest anything — once the
+action has already failed silently, it doesn't retry. To actually isolate the cause, turn the
+screen on and unlock the phone yourself, keep it that way, then trigger the Bluetooth connection
+(reconnect, or toggle Bluetooth off/on on the car). If the browser opens fine with the screen
+already on but never does with the screen off, that's a confirmed background-start block, not a
+problem with the routine's link/condition/action itself.
+
 Things to check, roughly in order of how often they're the actual cause:
 
-1. **Battery optimization on the Routines/Bixby engine.** Settings → Apps → find *Routines* (or
+1. **Grant "Display over other apps" to the browser the routine opens** (Samsung Internet or
+   Chrome, whichever is your default). Settings → Apps → [that browser] → Advanced → Display over
+   other apps → **Allow**. This is one of the specific permissions Android exempts from the
+   background-activity-start block, and it's the most reliable single fix.
+2. **Battery optimization on the Routines/Bixby engine.** Settings → Apps → find *Routines* (or
    *Bixby Routines* / *Modes and Routines*) → Battery → set to **Unrestricted**. If it's
    "Optimized" or "Restricted", Android can kill it before the action fires.
-2. **Add a "Turn on screen" action before "Open link"**, if your One UI version offers it (Routine
-   → Add action → Device settings → Turn on screen). Many reports say the open action only works
-   reliably once the screen is already on.
-3. **Confirm the Bluetooth condition is the exact car device**, not "any Bluetooth device" — pick
+3. **Add a "Turn on screen" / "Wake screen" action before "Open link"**, if your One UI version
+   offers it (Routine → Add action → Device settings). Put it first in the action list.
+4. **Confirm the Bluetooth condition is the exact car device**, not "any Bluetooth device" — pick
    it from the paired-devices list when adding the condition, and re-pick it if you ever unpaired
    and re-paired the car.
-4. **Check the routine is set to run every time, not once.** Routines conditions can be
+5. **Check the routine is set to run every time, not once.** Routines conditions can be
    configured to trigger only the first time they're met; if it already fired once historically,
    it may not fire again until the condition toggles off and on.
-5. **Test with the phone unlocked and the screen on first.** If the routine works fine unlocked
-   but not locked/screen-off, that confirms it's the background-start restriction above, not a
-   problem with the link, the condition, or this page.
 6. **Auto Blocker / "More security settings"** on newer One UI can further restrict background
    app launches — check there isn't an added restriction on the Routines app specifically.
 
 None of this can be fixed from the web page itself — it's the OS deciding whether to let the
 automation draw a UI at all, before the browser (and this page) ever gets a chance to run.
+
+**If none of that works:** this is a known, somewhat unreliable corner of Samsung Routines on
+newer One UI/Android versions — some phones simply won't let it draw a screen from a locked
+state no matter what's granted. The common escape hatch is switching this specific automation to
+**Tasker** or **MacroDroid** instead of Routines; both use a foreground-service/accessibility-based
+launch path that survives the lock screen far more reliably. That's phone-side setup, not
+something this page can do, but it's worth knowing if Routines turns out to be a dead end.
 
 ### Diagnosing what actually happened
 

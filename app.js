@@ -30,20 +30,32 @@
    * trigger (Samsung Routines, Tasker, etc.) usually lands in the browser     *
    * instead of the app, because Android only hands a link to the matching    *
    * app when it trusts the tap that opened it. An intent:// URL sidesteps    *
-   * that by naming the target app package directly, with the plain URL as a  *
-   * fallback if the app isn't installed. This only works in Chromium-based   *
-   * browsers (Chrome, Samsung Internet) — not in-app WebViews.               *
+   * that by naming the target app package directly, with a fallback URL if  *
+   * the app isn't installed. This only works in Chromium-based browsers      *
+   * (Chrome, Samsung Internet) — not in-app WebViews.                        *
+   *                                                                          *
+   * For a music.youtube.com link specifically, the fallback is itself a      *
+   * second intent:// URL targeting the regular YouTube app (which can also   *
+   * play the same video, just without the Music UI) — so a phone that has    *
+   * YouTube but not YouTube Music still lands in an app, not the browser.    *
+   * Only the final fallback, if neither app is installed, is a plain URL.    *
    * -------------------------------------------------------------------------- */
-  var YOUTUBE_PACKAGES = {
-    "music.youtube.com": "com.google.android.apps.youtube.music",
-    "www.youtube.com": "com.google.android.youtube",
-    "youtube.com": "com.google.android.youtube",
-    "youtu.be": "com.google.android.youtube",
-    "m.youtube.com": "com.google.android.youtube"
-  };
+  var PKG_YOUTUBE_MUSIC = "com.google.android.apps.youtube.music";
+  var PKG_YOUTUBE = "com.google.android.youtube";
+  var YOUTUBE_VIDEO_HOSTS = ["www.youtube.com", "youtube.com", "youtu.be", "m.youtube.com"];
 
   function isAndroid() {
     return /Android/i.test(navigator.userAgent || "");
+  }
+
+  function buildIntent(pkg, targetUrl, fallbackUrl) {
+    var scheme = targetUrl.slice(0, targetUrl.indexOf(":"));
+    var rest = targetUrl.slice(scheme.length + 3); // strip "<scheme>://"
+    return "intent://" + rest +
+      "#Intent;scheme=" + scheme +
+      ";package=" + pkg +
+      ";S.browser_fallback_url=" + encodeURIComponent(fallbackUrl) +
+      ";end";
   }
 
   // Returns an intent:// URL for a recognized YouTube host, or null if the
@@ -55,14 +67,20 @@
     } catch (e) {
       return null;
     }
-    var pkg = YOUTUBE_PACKAGES[parsed.hostname.toLowerCase()];
-    if (!pkg) return null;
-    var rest = parsed.href.slice(parsed.protocol.length + 2); // strip "https://"
-    return "intent://" + rest +
-      "#Intent;scheme=" + parsed.protocol.replace(":", "") +
-      ";package=" + pkg +
-      ";S.browser_fallback_url=" + encodeURIComponent(parsed.href) +
-      ";end";
+    var host = parsed.hostname.toLowerCase();
+
+    if (host === "music.youtube.com") {
+      var videoUrl = new URL(rawUrl);
+      videoUrl.hostname = "www.youtube.com"; // the regular app opens this form directly
+      var videoIntent = buildIntent(PKG_YOUTUBE, videoUrl.href, rawUrl);
+      return buildIntent(PKG_YOUTUBE_MUSIC, rawUrl, videoIntent);
+    }
+
+    if (YOUTUBE_VIDEO_HOSTS.indexOf(host) !== -1) {
+      return buildIntent(PKG_YOUTUBE, rawUrl, rawUrl);
+    }
+
+    return null;
   }
 
   function launchUrlFor(rawUrl, openInApp) {
