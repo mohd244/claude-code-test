@@ -1,0 +1,16 @@
+name = "morning-drive"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# Edit these to taste, then redeploy with `npx wrangler deploy`.
+[vars]
+TARGET_URL = "https://music.youtube.com/watch?v=mavP2gTNrtg&si=pH8th9lFt2fgQuUl&t=0"
+# Find yours at https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+TIMEZONE = "UTC"
+DAY_START_HOUR = "4"
+
+# Filled in by `npx wrangler kv namespace create MORNING_DRIVE` — see
+# worker/README.md for the full setup walkthrough.
+[[kv_namespaces]]
+binding = "MORNING_DRIVE"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
